@@ -91,6 +91,7 @@ struct Screen *open_screen() {
     if (!(screen = OpenScreen(&ns))) return NULL;
     nw.Screen = screen;
     LoadRGB4(&screen->ViewPort, palette, 4);
+    SetAPen(&screen->RastPort, ns.DetailPen);
 
     if (!(window = OpenWindow(&nw))) goto error;
 
@@ -156,11 +157,12 @@ static UBYTE *ReadFile(STRPTR filename) {
     return NULL;
 }
 
+/* #define SCROLL_VPORT */
+
 int main(void) {
     struct Screen *screen;
     struct RastPort *rp;
     UBYTE *scrollText, *cur;
-    UBYTE buf[2] = {0, 0};
     WORD i;
 
     CloseWorkBench();
@@ -168,27 +170,39 @@ int main(void) {
     if ((screen = open_screen())) {
         rp = &screen->RastPort;
         if ((scrollText = ReadFile("scroll.txt"))) {
-
             for (;;) {
                 cur = scrollText;
-
                 while (*cur) {
                     if (*cur == '@') {
                         SetAPen(rp, cur[1] - '0');
                         cur += 2;
                     }
+                    if (*cur < ' ') {
+                        *cur=' ';
+                    }
+
+#ifdef SCROLL_VPORT
+                    screen->ViewPort.DxOffset = rp->Font->tf_XSize;
+                    ScrollVPort(&screen->ViewPort);
+                    ScrollRaster(rp, rp->Font->tf_XSize, 0, 0, 0, 640 + 15, 15);
+#endif
                     Move(rp, 640, rp->Font->tf_Baseline);
                     Text(rp, cur, 1);
-                    i = 8;
+#ifdef SCROLL_VPORT
+                    while (screen->ViewPort.DxOffset--) {
+                        ScrollVPort(&screen->ViewPort);
+                    }
+#else
+                    i=rp->Font->tf_XSize;
                     while (i--) {
                         ScrollRaster(rp, 1, 0, 0, 0, 640 + 15, 15);
-                        //BltBitMap(rp->BitMap, 1, 0, rp->BitMap, 0, 0, 655, 15, 0xC0, 0xFF, NULL);
                         WaitTOF();
                     }
+#endif
+
                     cur++;
                 }
             }
-            Delay(100);
 
             FreeVec(scrollText);
         }

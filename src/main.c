@@ -5,9 +5,9 @@
 #include <clib/exec_protos.h>
 
 #include "mem.h"
+#include "graphics.h"
 
 UWORD blankPointer[2] = {0x0000, 0x0000};
-
 
 struct BitMap *AllocateBitMapManual(ULONG width, ULONG height, UBYTE depth) {
     struct BitMap *bitmap;
@@ -49,17 +49,15 @@ struct BitMap *AllocateBitMapManual(ULONG width, ULONG height, UBYTE depth) {
 
 
 struct Screen *open_screen() {
+    struct Screen *screen;
+    struct Window *window;
     UWORD palette[] = {
         0x000,
         0xccc,
         0xc55,
         0x469
     };
-
-    struct BitMap *bmap;
-
-    bmap = AllocateBitMapManual(640 + 16, 16, 2);
-
+    struct BitMap *bmap = AllocateBitMapManual(640 + 16, 16, 2);
     struct NewScreen ns = {
         0, 200, 640, 16,
         2,
@@ -85,8 +83,6 @@ struct Screen *open_screen() {
         ns.Width, ns.Height,
         CUSTOMSCREEN
     };
-    struct Screen *screen;
-    struct Window *window;
 
     if (!(screen = OpenScreen(&ns))) return NULL;
     nw.Screen = screen;
@@ -157,51 +153,24 @@ static UBYTE *ReadFile(STRPTR filename) {
     return NULL;
 }
 
-/* #define SCROLL_VPORT */
-
 int main(void) {
     struct Screen *screen;
     struct RastPort *rp;
-    UBYTE *scrollText, *cur;
-    WORD i;
-
+    UBYTE *scrollText;
     CloseWorkBench();
 
     if ((screen = open_screen())) {
         rp = &screen->RastPort;
         if ((scrollText = ReadFile("scroll.txt"))) {
-            for (;;) {
-                cur = scrollText;
-                while (*cur) {
-                    if (*cur == '@') {
-                        SetAPen(rp, cur[1] - '0');
-                        cur += 2;
-                    }
-                    if (*cur < ' ') {
-                        *cur=' ';
-                    }
+            struct Scroller scroller;
 
-#ifdef SCROLL_VPORT
-                    screen->ViewPort.DxOffset = rp->Font->tf_XSize;
-                    ScrollVPort(&screen->ViewPort);
-                    ScrollRaster(rp, rp->Font->tf_XSize, 0, 0, 0, 640 + 15, 15);
-#endif
-                    Move(rp, 640, rp->Font->tf_Baseline);
-                    Text(rp, cur, 1);
-#ifdef SCROLL_VPORT
-                    while (screen->ViewPort.DxOffset--) {
-                        ScrollVPort(&screen->ViewPort);
-                    }
-#else
-                    i=rp->Font->tf_XSize;
-                    while (i--) {
-                        ScrollRaster(rp, 1, 0, 0, 0, 640 + 15, 15);
-                        WaitTOF();
-                    }
-#endif
+            if (initScroller(&scroller, 640, 0, 0, rp, scrollText, NULL)) {
+              while (TRUE) {
+                scroll(&scroller);
+                WaitTOF();
+              }
 
-                    cur++;
-                }
+              freeScroller(&scroller);
             }
 
             FreeVec(scrollText);

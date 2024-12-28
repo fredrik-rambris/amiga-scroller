@@ -8,4 +8,5 @@ set(CMAKE_C_STANDARD 90)
 add_executable(${CMAKE_PROJECT_NAME}
         src/main.c
         src/mem.c
+        src/graphics.c
 )

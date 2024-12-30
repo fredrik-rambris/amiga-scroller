@@ -6,7 +6,7 @@
 
 #include "mem.h"
 
-UWORD blankPointer[2] = {0x0000, 0x0000};
+UWORD __chip blankPointer[2] = {0x0000, 0x0000};
 
 
 struct BitMap *AllocateBitMapManual(ULONG width, ULONG height, UBYTE depth) {
@@ -56,20 +56,16 @@ struct Screen *open_screen() {
         0x469
     };
 
-    struct BitMap *bmap;
-
-    bmap = AllocateBitMapManual(640 + 16, 16, 2);
-
     struct NewScreen ns = {
         0, 200, 640, 16,
         2,
         1, 0,
         HIRES,
-        CUSTOMSCREEN | SCREENQUIET | CUSTOMBITMAP,
+        CUSTOMSCREEN | SCREENQUIET,
         NULL,
         "Text Test",
         NULL,
-        bmap
+        NULL
     };
 
     struct NewWindow nw = {
@@ -98,8 +94,8 @@ struct Screen *open_screen() {
     SetPointer(
         window, // Correct: Pass the pointer to the window
         blankPointer, // Pointer to the blank image data
-        1, // Width in words (16 pixels / 16 = 1 word)
-        1, // Height in pixels
+        0, // Width in words (16 pixels / 16 = 1 word)
+        0, // Height in pixels
         0, // X-offset (hotspot)
         0 // Y-offset (hotspot)
     );
@@ -157,54 +153,88 @@ static UBYTE *ReadFile(STRPTR filename) {
     return NULL;
 }
 
-/* #define SCROLL_VPORT */
+struct RastPort *create_rastport(struct RastPort *srcRp, ULONG width, ULONG height, UBYTE depth) {
+    struct RastPort *rp;
+
+    if ((rp = AllocVec(sizeof(struct RastPort), MEMF_PUBLIC|MEMF_CLEAR))) {
+        InitRastPort(rp);
+        if ((rp->BitMap = AllocateBitMapManual((width + srcRp->Font->tf_XSize) * 2, height, depth))) {
+            return rp;
+        }
+
+        rp->BgPen = srcRp->BgPen;
+        rp->FgPen = srcRp->FgPen;
+        rp->Font = srcRp->Font;
+
+
+        FreeVec(rp);
+    }
+
+    return NULL;
+}
+
+void free_rastport(struct RastPort *rp) {
+    if (rp) {
+        if (rp->BitMap) {
+            FreeVec(rp->BitMap);
+        }
+        FreeVec(rp);
+    }
+}
 
 int main(void) {
     struct Screen *screen;
     struct RastPort *rp;
     UBYTE *scrollText, *cur;
-    WORD i;
+    WORD i, xsize;
+    int tpos = 0, xpos = 0;
 
     CloseWorkBench();
 
     if ((screen = open_screen())) {
-        rp = &screen->RastPort;
-        if ((scrollText = ReadFile("scroll.txt"))) {
-            for (;;) {
-                cur = scrollText;
-                while (*cur) {
-                    if (*cur == '@') {
-                        SetAPen(rp, cur[1] - '0');
-                        cur += 2;
-                    }
-                    if (*cur < ' ') {
-                        *cur=' ';
-                    }
+        if ((rp = create_rastport(&screen->RastPort, screen->Width, screen->Height, screen->BitMap.Depth))) {
+            xsize = screen->Width + screen->RastPort.Font->tf_XSize;
 
-#ifdef SCROLL_VPORT
-                    screen->ViewPort.DxOffset = rp->Font->tf_XSize;
-                    ScrollVPort(&screen->ViewPort);
-                    ScrollRaster(rp, rp->Font->tf_XSize, 0, 0, 0, 640 + 15, 15);
-#endif
-                    Move(rp, 640, rp->Font->tf_Baseline);
-                    Text(rp, cur, 1);
-#ifdef SCROLL_VPORT
-                    while (screen->ViewPort.DxOffset--) {
-                        ScrollVPort(&screen->ViewPort);
-                    }
-#else
-                    i=rp->Font->tf_XSize;
-                    while (i--) {
-                        ScrollRaster(rp, 1, 0, 0, 0, 640 + 15, 15);
-                        WaitTOF();
-                    }
-#endif
+            if ((scrollText = ReadFile("scroll.txt"))) {
+                for (;;) {
+                    cur = scrollText;
+                    xpos = rp->Font->tf_XSize;
+                    while (*cur) {
+                        if (*cur == '@') {
+                            SetAPen(rp, cur[1] - '0');
+                            cur += 2;
+                        }
+                        if (*cur < ' ') {
+                            *cur = ' ';
+                        }
 
-                    cur++;
+                        Move(rp, tpos, rp->Font->tf_Baseline);
+                        Text(rp, cur, 1);
+                        Move(rp, tpos + xsize, rp->Font->tf_Baseline);
+                        Text(rp, cur, 1);
+                        tpos += rp->Font->tf_XSize;
+
+                        i = rp->Font->tf_XSize;
+                        while (i--) {
+                            WaitTOF();
+                            BltBitMapRastPort(rp->BitMap, xpos, 0, &screen->RastPort, 0, 0, screen->Width, rp->Font->tf_YSize, ABC | ABNC);
+                            xpos++;
+                        }
+
+                        if (xpos > xsize) {
+                            xpos = rp->Font->tf_XSize;
+                        }
+                        if (tpos > screen->Width) {
+                            tpos = 0;
+                        }
+
+                        cur++;
+                    }
                 }
-            }
 
-            FreeVec(scrollText);
+                FreeVec(scrollText);
+            }
+            free_rastport(rp);
         }
         close_screen(screen);
     }
